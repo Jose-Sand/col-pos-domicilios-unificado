@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Restaurante que usa el sistema
+model Restaurant {
+  id            String    @id @default(uuid())
+  nit           String    @unique
+  nombre        String
+  telefono      String
+  direccion     String
+  ciudad        String
+  activo        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  plataformas   PlatformConfig[]
+  productos     Product[]
+  ordenes       Order[]
+}
+
+// Configuración de credenciales por plataforma
+model PlatformConfig {
+  id            String    @id @default(uuid())
+  restaurantId  String
+  plataforma    Platform
+  apiKey        String
+  apiSecret     String?
+  storeId       String
+  activo        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+  
+  @@unique([restaurantId, plataforma])
+  @@index([restaurantId])
+}
+
+// Producto del restaurante
+model Product {
+  id            String    @id @default(uuid())
+  restaurantId  String
+  sku           String
+  nombre        String
+  precio        Int       // En centavos (COP)
+  disponible    Boolean   @default(true)
+  stock         Int       @default(0)
+  descripcion   String?
+  categoria     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+  mappings      ProductMapping[]
+  orderItems    OrderItem[]
+  syncJobs      SyncJob[]
+  
+  @@unique([restaurantId, sku])
+  @@index([restaurantId])
+}
+
+// Mapeo de SKU del restaurante a IDs de plataformas
+model ProductMapping {
+  id            String    @id @default(uuid())
+  productId     String
+  plataforma    Platform
+  externalId    String    // ID del producto en la plataforma
+  externalSku   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  product       Product   @relation(fields: [productId], references: [id])
+  
+  @@unique([productId, plataforma])
+  @@index([productId])
+  @@index([externalId, plataforma])
+}
+
+// Orden normalizada
+model Order {
+  id              String      @id @default(uuid())
+  restaurantId    String
+  plataforma      Platform
+  externalId      String      // ID de la orden en la plataforma
+  numeroOrden     String      // Número legible para el restaurante
+  estado          OrderStatus @default(RECEIVED)
+  subtotal        Int         // En centavos (COP)
+  propina         Int         @default(0)
+  domicilio       Int         @default(0)
+  total           Int
+  metodoPago      String
+  clienteNombre   String
+  clienteTelefono String
+  direccionEntrega String
+  ciudad          String
+  instrucciones   String?
+  rawPayload      Json        // Payload original de la plataforma
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id])
+  items           OrderItem[]
+  
+  @@unique([plataforma, externalId])
+  @@index([restaurantId, createdAt])
+  @@index([estado])
+}
+
+// Items de la orden
+model OrderItem {
+  id            String    @id @default(uuid())
+  orderId       String
+  productId     String?
+  nombre        String
+  cantidad      Int
+  precioUnitario Int      // En centavos (COP)
+  subtotal      Int
+  instrucciones String?
+  
+  order         Order     @relation(fields: [orderId], references: [id])
+  product       Product?  @relation(fields: [productId], references: [id])
+  
+  @@index([orderId])
+}
+
+// Trabajos de sincronización de inventario
+model SyncJob {
+  id            String      @id @default(uuid())
+  productId     String
+  plataforma    Platform?   // null = todas las plataformas
+  accion        SyncAction
+  nuevoStock    Int?
+  disponible    Boolean?
+  estado        JobStatus   @default(PENDING)
+  intentos      Int         @default(0)
+  maxIntentos   Int         @default(3)
+  error         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  procesadoAt   DateTime?
+  
+  product       Product     @relation(fields: [productId], references: [id])
+  
+  @@index([estado, createdAt])
+  @@index([productId])
+}
+
+enum Platform {
+  RAPPI
+  IFOOD
+  DOMICILIOS_COM
+  UBER_EATS
+}
+
+enum OrderStatus {
+  RECEIVED
+  CONFIRMED
+  PREPARING
+  READY
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+enum SyncAction {
+  UPDATE_STOCK
+  UPDATE_AVAILABILITY
+  UPDATE_PRICE
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
